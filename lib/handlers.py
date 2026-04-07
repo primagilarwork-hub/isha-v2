@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 from lib import config, db, ai_engine, telegram, sheets_sync
 
 
@@ -7,7 +7,6 @@ def _format_budget_reply(budget_status: dict, cycle: dict) -> str:
     lines = [f"📊 *Budget Cycle {cycle['start'].strftime('%d %b')} - {cycle['end'].strftime('%d %b')}*\n"]
     for g in groups:
         spent = budget_status.get(g["name"], 0)
-        # Cek override
         override = db.get_budget_override(cycle["id"], g["name"])
         budgeted = override if override else g["amount"]
         remaining = budgeted - spent
@@ -67,7 +66,7 @@ def handle_expense(items: list, cycle: dict) -> str:
         db.add_expense(record)
         saved.append(record)
 
-        # Sync ke Sheets (best effort, tidak blocking)
+        # Sync ke Sheets (best effort)
         try:
             sheets_sync.sync_expense(record)
         except Exception:
@@ -199,7 +198,6 @@ def handle_message(message: dict) -> str:
         reply = handle_delete(data, cycle)
     elif intent == "RECORD_INCOME":
         reply = handle_income(data, cycle)
-    # GENERAL_CHAT, ASK_ADVICE, EDIT_EXPENSE → pakai reply dari Claude langsung
 
     if advice:
         reply += f"\n\n💡 {advice}"
@@ -220,7 +218,6 @@ def generate_reminder_message() -> str:
     else:
         lines.append("Hari ini belum ada pengeluaran yang dicatat. Ada yang ketinggalan?")
 
-    # Budget alerts
     groups = config.get_budget_groups()
     for g in groups:
         spent = budget_status.get(g["name"], 0)
@@ -231,4 +228,70 @@ def generate_reminder_message() -> str:
     if cycle["days_remaining"] <= 3:
         lines.append(f"\n📅 Cycle hampir selesai! Sisa {cycle['days_remaining']} hari.")
 
+    return "\n".join(lines)
+
+
+def generate_weekly_summary() -> str:
+    today = date.today()
+    # Minggu lalu: Senin - Minggu
+    last_monday = today - timedelta(days=today.weekday() + 7)
+    last_sunday = last_monday + timedelta(days=6)
+
+    cycle = config.get_current_cycle()
+    expenses = db.get_expenses(cycle["id"])
+
+    # Filter ke minggu lalu
+    weekly = [
+        e for e in expenses
+        if last_monday.strftime("%Y-%m-%d") <= e["expense_date"] <= last_sunday.strftime("%Y-%m-%d")
+    ]
+
+    if not weekly:
+        return f"📅 *Ringkasan Minggu Lalu* ({last_monday.strftime('%d %b')} - {last_sunday.strftime('%d %b')})\n\nTidak ada pengeluaran minggu lalu."
+
+    total = sum(float(e["amount"]) for e in weekly)
+    by_group = {}
+    for e in weekly:
+        g = e["budget_group"]
+        by_group[g] = by_group.get(g, 0) + float(e["amount"])
+
+    lines = [
+        f"📅 *Ringkasan Minggu Lalu* ({last_monday.strftime('%d %b')} - {last_sunday.strftime('%d %b')})",
+        f"Total: Rp {total:,.0f} ({len(weekly)} transaksi)\n",
+    ]
+    for group, amt in sorted(by_group.items(), key=lambda x: x[1], reverse=True):
+        lines.append(f"• {group}: Rp {amt:,.0f}")
+
+    return "\n".join(lines)
+
+
+def generate_system_review(cycle_id: str) -> str:
+    summary = db.get_cycle_summary(cycle_id)
+    cycle = config.get_current_cycle()
+    groups = config.get_budget_groups()
+
+    lines = [f"📋 *SYSTEM REVIEW — Cycle {cycle['start'].strftime('%d %b')} - {cycle['end'].strftime('%d %b %Y')}*\n"]
+
+    total = summary["total"]
+    total_budget = sum(g["amount"] for g in groups)
+    surplus = total_budget - total
+    saving_rate = int(surplus / total_budget * 100) if total_budget > 0 else 0
+
+    lines.append(f"📊 *RINGKASAN CYCLE*")
+    lines.append(f"Total pengeluaran: Rp {total:,.0f} / {total_budget:,.0f}")
+    lines.append(f"Surplus: Rp {surplus:,.0f} | Saving rate: {saving_rate}%\n")
+
+    lines.append("💰 *STATUS PER BUDGET*")
+    for g in groups:
+        spent = summary["by_group"].get(g["name"], 0)
+        pct = int(spent / g["amount"] * 100) if g["amount"] > 0 else 0
+        if pct >= 90:
+            icon = "🔴"
+        elif pct >= 70:
+            icon = "⚠️"
+        else:
+            icon = "✅"
+        lines.append(f"{icon} {g['name']}: Rp {spent:,.0f} / {g['amount']:,.0f} ({pct}%)")
+
+    lines.append("\nSemangat cycle baru! 🚀")
     return "\n".join(lines)
