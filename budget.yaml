@@ -1,0 +1,52 @@
+cycle:
+  start_day: 25  # Gaji masuk tanggal 25 → cycle: 25 Jan → 24 Feb
+
+income:
+  monthly: 10000000  # Sesuaikan dengan gaji aktual
+
+budgets:
+  - name: "Makan & Minum"
+    amount: 3000000
+    categories:
+      - makan-diluar
+      - groceries
+      - kopi
+      - jajan
+
+  - name: "Transport"
+    amount: 1500000
+    categories:
+      - bensin
+      - parkir
+      - tol
+      - ojol
+
+  - name: "Tagihan"
+    amount: 2000000
+    categories:
+      - listrik
+      - internet
+      - pulsa
+      - air
+
+  - name: "Kebutuhan Rumah"
+    amount: 1500000
+    categories:
+      - peralatan
+      - perbaikan
+      - kebersihan
+
+  - name: "Tabungan & Investasi"
+    amount: 1000000
+    categories:
+      - emas
+      - tabungan
+      - darurat
+
+  - name: "Lain-lain"
+    amount: 1000000
+    categories:
+      - hiburan
+      - kesehatan
+      - gift
+      - misc
