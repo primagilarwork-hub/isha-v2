@@ -1,12 +1,9 @@
+from http.server import BaseHTTPRequestHandler
 import json
 
-def handler(request):
-    """
-    Placeholder webhook endpoint.
-    Akan diimplementasi di Phase 1A.
-    """
-    return {
-        "statusCode": 200,
-        "headers": {"Content-Type": "application/json"},
-        "body": json.dumps({"status": "ok"})
-    }
+class handler(BaseHTTPRequestHandler):
+    def do_POST(self):
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(json.dumps({"status": "ok"}).encode())
