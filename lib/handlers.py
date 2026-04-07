@@ -1,5 +1,5 @@
 from datetime import date
-from lib import config, db, ai_engine, telegram
+from lib import config, db, ai_engine, telegram, sheets_sync
 
 
 def _format_budget_reply(budget_status: dict, cycle: dict) -> str:
@@ -66,6 +66,12 @@ def handle_expense(items: list, cycle: dict) -> str:
         }
         db.add_expense(record)
         saved.append(record)
+
+        # Sync ke Sheets (best effort, tidak blocking)
+        try:
+            sheets_sync.sync_expense(record)
+        except Exception:
+            pass
 
         alert = check_budget_alert(budget_info["group_name"], cycle["id"])
         if alert and alert not in alerts:
@@ -139,6 +145,10 @@ def handle_delete(data: dict, cycle: dict) -> str:
     if len(matches) == 1:
         e = matches[0]
         db.delete_expense(e["id"])
+        try:
+            sheets_sync.sync_delete(e["id"])
+        except Exception:
+            pass
         return f"🗑️ Dihapus: *{e['description']}* — Rp {float(e['amount']):,.0f} ({e['expense_date']})"
 
     lines = [f"Ada {len(matches)} pengeluaran yang cocok, yang mana?\n"]
