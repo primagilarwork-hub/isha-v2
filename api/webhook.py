@@ -27,8 +27,17 @@ class handler(BaseHTTPRequestHandler):
             reply_text = handlers.handle_message(message)
             telegram.reply(message, reply_text)
 
+        except json.JSONDecodeError as e:
+            print(f"[webhook] invalid JSON: {e}")
         except Exception as e:
             print(f"[webhook error] {e}")
+            try:
+                update = json.loads(body)
+                message = update.get("message") or update.get("edited_message")
+                if message:
+                    telegram.reply(message, "Maaf, ada error. Coba lagi ya 🙏")
+            except Exception:
+                pass
 
     def do_GET(self):
         self.send_response(200)

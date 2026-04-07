@@ -175,29 +175,47 @@ def handle_income(data: dict, cycle: dict) -> str:
 def handle_message(message: dict) -> str:
     text = message.get("text", "")
     if not text:
-        return "Maaf, aku belum bisa proses pesan ini."
+        return "Maaf, aku belum bisa proses pesan ini. Coba kirim teks ya."
+
+    # Ignore command Telegram (/start, /help, dll)
+    if text.startswith("/"):
+        if text.startswith("/start"):
+            return "Halo! Aku Isha, financial advisor keluarga kamu 👋\n\nCukup chat natural aja, misalnya:\n• _makan siang 25rb_\n• _berapa sisa budget makan?_\n• _rangkum pengeluaran hari ini_"
+        if text.startswith("/budget"):
+            cycle = config.get_current_cycle()
+            return handle_check_budget({}, cycle)
+        return "Aku tidak pakai command. Cukup chat natural aja ya 😊"
 
     cycle = config.get_current_cycle()
     budget_status = db.get_budget_status(cycle["id"])
     recent = db.get_recent_expenses(5)
 
-    parsed = ai_engine.parse_message(text, budget_status, recent)
+    try:
+        parsed = ai_engine.parse_message(text, budget_status, recent)
+    except Exception as e:
+        print(f"[ai_engine error] {e}")
+        return "Maaf, aku lagi gangguan koneksi ke AI. Coba lagi dalam beberapa detik ya 🙏"
+
     intent = parsed.get("intent", "GENERAL_CHAT")
     data = parsed.get("data", {})
     reply = parsed.get("reply", "")
     advice = parsed.get("advice")
 
-    if intent == "RECORD_EXPENSE":
-        items = data.get("items", [])
-        reply = handle_expense(items, cycle)
-    elif intent == "CHECK_BUDGET":
-        reply = handle_check_budget(data, cycle)
-    elif intent == "REPORT":
-        reply = handle_report(data, cycle)
-    elif intent == "DELETE_EXPENSE":
-        reply = handle_delete(data, cycle)
-    elif intent == "RECORD_INCOME":
-        reply = handle_income(data, cycle)
+    try:
+        if intent == "RECORD_EXPENSE":
+            items = data.get("items", [])
+            reply = handle_expense(items, cycle)
+        elif intent == "CHECK_BUDGET":
+            reply = handle_check_budget(data, cycle)
+        elif intent == "REPORT":
+            reply = handle_report(data, cycle)
+        elif intent == "DELETE_EXPENSE":
+            reply = handle_delete(data, cycle)
+        elif intent == "RECORD_INCOME":
+            reply = handle_income(data, cycle)
+    except Exception as e:
+        print(f"[handler error] intent={intent} error={e}")
+        return "Maaf, ada error saat proses permintaanmu. Coba lagi ya 🙏"
 
     if advice:
         reply += f"\n\n💡 {advice}"
