@@ -63,7 +63,9 @@ def handle_expense(items: list, cycle: dict) -> str:
             "expense_date": expense_date,
             "cycle_id": cycle["id"],
         }
-        db.add_expense(record)
+        saved_record = db.add_expense(record)
+        # Gabungkan ID yang dikembalikan Supabase
+        record["id"] = saved_record.get("id", "")
         saved.append(record)
 
         # Sync ke Sheets (best effort)
