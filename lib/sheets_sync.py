@@ -88,7 +88,7 @@ def sync_expense(expense: dict) -> bool:
             expense.get("category", ""),
             expense.get("budget_group", ""),
             expense.get("description", ""),
-            expense.get("amount", 0),
+            f"Rp {float(expense.get('amount', 0)):,.0f}".replace(",", "."),
             expense.get("user_name", ""),
             f"{cycle['start'].strftime('%d %b')} - {cycle['end'].strftime('%d %b %Y')}",
             expense.get("created_at", ""),

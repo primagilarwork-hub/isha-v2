@@ -39,7 +39,7 @@ def check_budget_alert(budget_group: str, cycle_id: str) -> str | None:
     return None
 
 
-def handle_expense(items: list, cycle: dict) -> str:
+def handle_expense(items: list, cycle: dict, user_name: str = "") -> str:
     if not items:
         return "Maaf, aku tidak bisa parse pengeluarannya. Coba ulangi ya."
 
@@ -64,8 +64,8 @@ def handle_expense(items: list, cycle: dict) -> str:
             "cycle_id": cycle["id"],
         }
         saved_record = db.add_expense(record)
-        # Gabungkan ID yang dikembalikan Supabase
         record["id"] = saved_record.get("id", "")
+        record["user_name"] = user_name
         saved.append(record)
 
         # Sync ke Sheets (best effort)
@@ -176,6 +176,7 @@ def handle_income(data: dict, cycle: dict) -> str:
 
 def handle_message(message: dict) -> str:
     text = message.get("text", "")
+    user_name = message.get("from", {}).get("first_name", "")
     if not text:
         return "Maaf, aku belum bisa proses pesan ini. Coba kirim teks ya."
 
@@ -206,7 +207,7 @@ def handle_message(message: dict) -> str:
     try:
         if intent == "RECORD_EXPENSE":
             items = data.get("items", [])
-            reply = handle_expense(items, cycle)
+            reply = handle_expense(items, cycle, user_name)
         elif intent == "CHECK_BUDGET":
             reply = handle_check_budget(data, cycle)
         elif intent == "REPORT":
