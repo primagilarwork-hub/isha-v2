@@ -35,14 +35,14 @@ Untuk RECORD_EXPENSE, field "data" berisi:
   ]
 }
 
+Untuk EDIT_EXPENSE:
+{"search": "keyword untuk cari expense", "new_amount": 20000, "new_description": "opsional", "new_category": "opsional"}
+
 Untuk DELETE_EXPENSE:
 {"search": "keyword", "expense_date": "YYYY-MM-DD atau null"}
 
 Untuk CHECK_BUDGET:
 {"budget_group": "nama group atau null untuk semua"}
-
-Untuk REPORT:
-{"period": "today | this_week | this_cycle"}
 
 Untuk RECORD_INCOME:
 {"amount": 10000000, "source": "gaji", "income_date": "YYYY-MM-DD"}

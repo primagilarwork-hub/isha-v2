@@ -131,6 +131,63 @@ def handle_report(data: dict, cycle: dict) -> str:
     return handle_check_budget(data, cycle)
 
 
+def handle_edit(data: dict, cycle: dict) -> str:
+    search = data.get("search", "")
+    recent = db.get_recent_expenses(10)
+
+    matches = [
+        e for e in recent
+        if search.lower() in (e.get("description") or "").lower()
+        or search.lower() in (e.get("category") or "").lower()
+    ]
+
+    if not matches:
+        return f"Tidak ketemu pengeluaran dengan kata kunci '{search}'."
+
+    if len(matches) > 1:
+        lines = [f"Ada {len(matches)} pengeluaran yang cocok, yang mana?\n"]
+        for i, e in enumerate(matches[:5], 1):
+            lines.append(f"{i}. {e['description']} — Rp {float(e['amount']):,.0f} ({e['expense_date']})")
+        lines.append("\nBalas dengan nomor yang mau diedit.")
+        return "\n".join(lines)
+
+    e = matches[0]
+    updates = {}
+
+    new_amount = data.get("new_amount")
+    if new_amount:
+        updates["amount"] = float(new_amount)
+
+    new_description = data.get("new_description")
+    if new_description:
+        updates["description"] = new_description
+
+    new_category = data.get("new_category")
+    if new_category:
+        budget_info = config.get_budget_for_category(new_category)
+        updates["category"] = new_category
+        updates["budget_group"] = budget_info["group_name"]
+
+    if not updates:
+        return "Tidak ada yang diubah. Sebutkan yang mau diedit, misalnya 'edit bakso jadi 20rb'."
+
+    db.edit_expense(e["id"], updates)
+
+    # Sync ke Sheets — hapus baris lama, append yang baru
+    try:
+        updated = {**e, **updates}
+        sheets_sync.sync_delete(e["id"])
+        sheets_sync.sync_expense(updated)
+    except Exception:
+        pass
+
+    # Compose reply
+    old_amount = float(e["amount"])
+    new_amt = updates.get("amount", old_amount)
+    desc = updates.get("new_description", e.get("description", ""))
+    return f"✏️ Diupdate!\n*{e['description']}* → Rp {new_amt:,.0f}\n_(sebelumnya Rp {old_amount:,.0f})_"
+
+
 def handle_delete(data: dict, cycle: dict) -> str:
     search = data.get("search", "")
     recent = db.get_recent_expenses(10)
@@ -215,6 +272,8 @@ def handle_message(message: dict) -> str:
             reply = handle_report(data, cycle)
         elif intent == "DELETE_EXPENSE":
             reply = handle_delete(data, cycle)
+        elif intent == "EDIT_EXPENSE":
+            reply = handle_edit(data, cycle)
         elif intent == "RECORD_INCOME":
             reply = handle_income(data, cycle)
     except Exception as e:
