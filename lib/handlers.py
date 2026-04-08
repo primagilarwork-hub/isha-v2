@@ -62,6 +62,7 @@ def handle_expense(items: list, cycle: dict, user_name: str = "") -> str:
             "description": item.get("description", ""),
             "expense_date": expense_date,
             "cycle_id": cycle["id"],
+            "user_name": user_name,
         }
         saved_record = db.add_expense(record)
         record["id"] = saved_record.get("id", "")
@@ -176,6 +177,9 @@ def handle_edit(data: dict, cycle: dict) -> str:
     # Sync ke Sheets — hapus baris lama, append yang baru
     try:
         updated = {**e, **updates}
+        # Pertahankan user_name dari record asli di Supabase
+        if not updated.get("user_name"):
+            updated["user_name"] = e.get("user_name", "")
         sheets_sync.sync_delete(e["id"])
         sheets_sync.sync_expense(updated)
     except Exception:
