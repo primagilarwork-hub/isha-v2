@@ -66,6 +66,7 @@ def handle_expense(items: list, cycle: dict, user_name: str = "") -> str:
         saved_record = db.add_expense(record)
         record["id"] = saved_record.get("id", "")
         record["user_name"] = user_name
+        record["created_at"] = saved_record.get("created_at", "")
         saved.append(record)
 
         # Sync ke Sheets (best effort)
