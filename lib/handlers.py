@@ -192,7 +192,7 @@ def handle_edit(data: dict, cycle: dict) -> str:
     return f"✏️ Diupdate!\n*{e['description']}* → Rp {new_amt:,.0f}\n_(sebelumnya Rp {old_amount:,.0f})_"
 
 
-def handle_delete(data: dict, cycle: dict) -> str:
+def handle_delete(data: dict, cycle: dict, chat_id: str = "") -> str:
     search = data.get("search", "")
     recent = db.get_recent_expenses(10)
 
@@ -205,20 +205,42 @@ def handle_delete(data: dict, cycle: dict) -> str:
     if not matches:
         return f"Tidak ketemu pengeluaran dengan kata kunci '{search}'."
 
-    if len(matches) == 1:
-        e = matches[0]
-        db.delete_expense(e["id"])
-        try:
-            sheets_sync.sync_delete(e["id"])
-        except Exception:
-            pass
-        return f"🗑️ Dihapus: *{e['description']}* — Rp {float(e['amount']):,.0f} ({e['expense_date']})"
+    if len(matches) > 1:
+        lines = [f"Ada {len(matches)} pengeluaran yang cocok, yang mana?\n"]
+        for i, e in enumerate(matches[:5], 1):
+            lines.append(f"{i}. {e['description']} — Rp {float(e['amount']):,.0f} ({e['expense_date']})")
+        lines.append("\nBalas dengan nomor yang mau dihapus.")
+        return "\n".join(lines)
 
-    lines = [f"Ada {len(matches)} pengeluaran yang cocok, yang mana?\n"]
-    for i, e in enumerate(matches[:5], 1):
-        lines.append(f"{i}. {e['description']} — Rp {float(e['amount']):,.0f} ({e['expense_date']})")
-    lines.append("\nBalas dengan nomor yang mau dihapus.")
-    return "\n".join(lines)
+    e = matches[0]
+
+    # Simpan pending delete, minta konfirmasi
+    if chat_id:
+        db.save_pending_action(chat_id, "delete", {"expense_id": e["id"]})
+
+    return (
+        f"🗑️ Yakin mau hapus ini?\n"
+        f"*{e['description']}* — Rp {float(e['amount']):,.0f} ({e['expense_date']})\n\n"
+        f"Balas *ya* untuk hapus, *batal* untuk cancel."
+    )
+
+
+def confirm_delete(expense_id: int, chat_id: str) -> str:
+    """Eksekusi hapus setelah user konfirmasi."""
+    recent = db.get_recent_expenses(20)
+    e = next((x for x in recent if x["id"] == expense_id), None)
+
+    db.delete_expense(expense_id)
+    db.clear_pending_action(chat_id)
+
+    try:
+        sheets_sync.sync_delete(expense_id)
+    except Exception:
+        pass
+
+    if e:
+        return f"✅ Dihapus: *{e['description']}* — Rp {float(e['amount']):,.0f}"
+    return "✅ Pengeluaran berhasil dihapus."
 
 
 def handle_receipt(message: dict, cycle: dict, user_name: str = "") -> str:
@@ -295,6 +317,23 @@ def handle_message(message: dict) -> str:
         cycle = config.get_current_cycle()
         return handle_sync_sheets(cycle)
 
+    # Shortcut: system review
+    if any(kw in text.lower() for kw in ["review cycle", "review bulan", "ringkasan cycle", "system review"]):
+        cycle = config.get_current_cycle()
+        return generate_system_review(cycle["id"])
+
+    # Cek pending action (konfirmasi hapus)
+    chat_id = str(message.get("chat", {}).get("id", ""))
+    if chat_id:
+        pending = db.get_pending_action(chat_id)
+        if pending:
+            if text.lower() in ["ya", "yes", "iya", "ok", "hapus"]:
+                if pending["action_type"] == "delete":
+                    return confirm_delete(pending["action_data"]["expense_id"], chat_id)
+            elif text.lower() in ["batal", "cancel", "tidak", "nggak", "gak"]:
+                db.clear_pending_action(chat_id)
+                return "Oke, dibatalkan 👍"
+
     cycle = config.get_current_cycle()
     budget_status = db.get_budget_status(cycle["id"])
     recent = db.get_recent_expenses(5)
@@ -319,7 +358,7 @@ def handle_message(message: dict) -> str:
         elif intent == "REPORT":
             reply = handle_report(data, cycle)
         elif intent == "DELETE_EXPENSE":
-            reply = handle_delete(data, cycle)
+            reply = handle_delete(data, cycle, chat_id)
         elif intent == "EDIT_EXPENSE":
             reply = handle_edit(data, cycle)
         elif intent == "RECORD_INCOME":
@@ -412,28 +451,47 @@ def generate_system_review(cycle_id: str) -> str:
     cycle = config.get_current_cycle()
     groups = config.get_budget_groups()
 
-    lines = [f"📋 *SYSTEM REVIEW — Cycle {cycle['start'].strftime('%d %b')} - {cycle['end'].strftime('%d %b %Y')}*\n"]
-
     total = summary["total"]
     total_budget = sum(g["amount"] for g in groups)
     surplus = total_budget - total
     saving_rate = int(surplus / total_budget * 100) if total_budget > 0 else 0
 
+    lines = [f"📋 *SYSTEM REVIEW — Cycle {cycle['start'].strftime('%d %b')} - {cycle['end'].strftime('%d %b %Y')}*\n"]
     lines.append(f"📊 *RINGKASAN CYCLE*")
     lines.append(f"Total pengeluaran: Rp {total:,.0f} / {total_budget:,.0f}")
     lines.append(f"Surplus: Rp {surplus:,.0f} | Saving rate: {saving_rate}%\n")
 
     lines.append("💰 *STATUS PER BUDGET*")
+    over_groups = []
+    under_groups = []
     for g in groups:
         spent = summary["by_group"].get(g["name"], 0)
         pct = int(spent / g["amount"] * 100) if g["amount"] > 0 else 0
+        remaining = g["amount"] - spent
         if pct >= 90:
             icon = "🔴"
+            over_groups.append(g["name"])
         elif pct >= 70:
             icon = "⚠️"
         else:
             icon = "✅"
+            if pct < 50:
+                under_groups.append((g["name"], remaining))
         lines.append(f"{icon} {g['name']}: Rp {spent:,.0f} / {g['amount']:,.0f} ({pct}%)")
+
+    # Saran rebalancing
+    if over_groups or under_groups:
+        lines.append("\n🔄 *SARAN BUDGET*")
+        for og in over_groups:
+            lines.append(f"⬆️ *{og}* sering over — pertimbangkan naikkan budget")
+        for ug, sisa in under_groups:
+            lines.append(f"⬇️ *{ug}* selalu sisa Rp {sisa:,.0f} — bisa dialihkan ke yang kurang")
+
+    if saving_rate > 0:
+        lines.append(f"\n🎯 *PENCAPAIAN*")
+        lines.append(f"Saving rate cycle ini: {saving_rate}% 🎉")
+        if saving_rate >= 10:
+            lines.append("Luar biasa! Konsisten ya di cycle berikutnya 💪")
 
     lines.append("\nSemangat cycle baru! 🚀")
     return "\n".join(lines)

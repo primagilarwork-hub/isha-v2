@@ -97,3 +97,33 @@ def save_budget_override(cycle_id: str, budget_group: str, original: float, over
         "reason": reason,
     }).execute()
     return bool(res.data)
+
+
+# ── Pending actions (untuk konfirmasi hapus/edit) ──────────
+def save_pending_action(chat_id: str, action_type: str, action_data: dict) -> bool:
+    # Hapus pending lama untuk chat ini dulu
+    _client().table("pending_actions").delete().eq("chat_id", chat_id).execute()
+    res = _client().table("pending_actions").insert({
+        "chat_id": chat_id,
+        "action_type": action_type,
+        "action_data": action_data,
+    }).execute()
+    return bool(res.data)
+
+def get_pending_action(chat_id: str) -> dict | None:
+    # Hapus yang sudah lebih dari 5 menit
+    from datetime import datetime, timedelta, timezone
+    cutoff = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+    _client().table("pending_actions").delete().lt("created_at", cutoff).execute()
+
+    res = (
+        _client().table("pending_actions")
+        .select("*")
+        .eq("chat_id", chat_id)
+        .limit(1)
+        .execute()
+    )
+    return res.data[0] if res.data else None
+
+def clear_pending_action(chat_id: str) -> None:
+    _client().table("pending_actions").delete().eq("chat_id", chat_id).execute()
