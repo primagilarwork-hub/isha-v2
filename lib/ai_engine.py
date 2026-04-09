@@ -117,3 +117,66 @@ def parse_message(text: str, budget_status: dict, recent_expenses: list) -> dict
             "reply": raw,
             "advice": None,
         }
+
+
+def scan_receipt(photo_bytes: bytes, budget_status: dict) -> dict:
+    """Kirim foto struk ke Claude Vision, extract items."""
+    import base64
+    context = _build_context(budget_status, [])
+    photo_b64 = base64.standard_b64encode(photo_bytes).decode("utf-8")
+
+    prompt = f"""Kamu adalah Isha, financial advisor keluarga.
+Analisis foto struk/nota ini dan extract semua item pengeluaran.
+
+CONTEXT BUDGET:
+{context}
+
+Kembalikan JSON dengan format:
+{{
+  "items": [
+    {{"description": "nama item", "amount": 15000, "category": "kategori-yang-cocok"}}
+  ],
+  "total": 50000,
+  "merchant": "nama toko/restoran jika terlihat",
+  "date": "YYYY-MM-DD jika terlihat, null jika tidak",
+  "reply": "Pesan konfirmasi natural untuk user"
+}}
+
+Pilih kategori dari daftar yang ada di context.
+Jika tidak bisa baca struk dengan jelas, tetap coba extract sebisanya.
+Kembalikan JSON ONLY, tidak ada teks lain."""
+
+    msg = _client.messages.create(
+        model=MODEL,
+        max_tokens=1024,
+        messages=[{
+            "role": "user",
+            "content": [
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "image/jpeg",
+                        "data": photo_b64,
+                    },
+                },
+                {"type": "text", "text": prompt},
+            ],
+        }],
+    )
+
+    raw = msg.content[0].text.strip()
+    if raw.startswith("```"):
+        raw = raw.split("```")[1]
+        if raw.startswith("json"):
+            raw = raw[4:]
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return {
+            "items": [],
+            "total": 0,
+            "merchant": "",
+            "date": None,
+            "reply": "Maaf, aku tidak bisa baca struk ini dengan jelas. Coba foto ulang dengan pencahayaan lebih baik ya.",
+        }

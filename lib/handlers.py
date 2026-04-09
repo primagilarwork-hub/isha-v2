@@ -221,6 +221,45 @@ def handle_delete(data: dict, cycle: dict) -> str:
     return "\n".join(lines)
 
 
+def handle_receipt(message: dict, cycle: dict, user_name: str = "") -> str:
+    """Handle foto struk dari user."""
+    from lib import telegram as tg
+
+    # Ambil foto resolusi tertinggi (last item = highest res)
+    photos = message.get("photo", [])
+    if not photos:
+        return "Tidak ada foto yang diterima."
+
+    file_id = photos[-1]["file_id"]
+    photo_bytes = tg.get_file(file_id)
+    if not photo_bytes:
+        return "Gagal download foto. Coba kirim ulang ya."
+
+    budget_status = db.get_budget_status(cycle["id"])
+
+    try:
+        result = ai_engine.scan_receipt(photo_bytes, budget_status)
+    except Exception as e:
+        print(f"[scan_receipt error] {e}")
+        return "Maaf, gagal proses foto. Coba lagi ya 🙏"
+
+    items = result.get("items", [])
+    if not items:
+        return result.get("reply", "Tidak bisa extract item dari struk ini.")
+
+    # Set tanggal dari struk kalau ada, fallback ke hari ini
+    receipt_date = result.get("date") or date.today().strftime("%Y-%m-%d")
+    for item in items:
+        item["expense_date"] = receipt_date
+
+    # Catat semua items
+    saved_reply = handle_expense(items, cycle, user_name)
+
+    merchant = result.get("merchant", "")
+    header = f"🧾 Struk *{merchant}* berhasil di-scan!\n\n" if merchant else "🧾 Struk berhasil di-scan!\n\n"
+    return header + saved_reply
+
+
 def handle_income(data: dict, cycle: dict) -> str:
     amount = float(data.get("amount", 0))
     if amount <= 0:

@@ -5,7 +5,7 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from lib import handlers, telegram
+from lib import handlers, telegram, config as app_config
 
 
 class handler(BaseHTTPRequestHandler):
@@ -24,7 +24,14 @@ class handler(BaseHTTPRequestHandler):
             if not message:
                 return
 
-            reply_text = handlers.handle_message(message)
+            # Handle foto (receipt scanning)
+            if message.get("photo"):
+                cycle = app_config.get_current_cycle()
+                user_name = message.get("from", {}).get("first_name", "")
+                reply_text = handlers.handle_receipt(message, cycle, user_name)
+            else:
+                reply_text = handlers.handle_message(message)
+
             telegram.reply(message, reply_text)
 
         except json.JSONDecodeError as e:
