@@ -126,20 +126,23 @@ def scan_receipt(photo_bytes: bytes, budget_status: dict) -> dict:
     photo_b64 = base64.standard_b64encode(photo_bytes).decode("utf-8")
 
     prompt = f"""Kamu adalah Isha, financial advisor keluarga.
-Analisis foto struk/nota ini dan extract semua item pengeluaran.
+Analisis foto struk/nota ini dan extract pengeluaran.
 
 CONTEXT BUDGET:
 {context}
 
+PENTING: Gunakan TOTAL AKHIR yang tertera di struk (sudah include tax, service charge, dll).
+Jangan catat per item — cukup 1 item dengan total yang harus dibayar.
+
 Kembalikan JSON dengan format:
 {{
   "items": [
-    {{"description": "nama item", "amount": 15000, "category": "kategori-yang-cocok"}}
+    {{"description": "nama merchant/jenis pengeluaran", "amount": 75000, "category": "kategori-yang-cocok"}}
   ],
-  "total": 50000,
+  "total": 75000,
   "merchant": "nama toko/restoran jika terlihat",
   "date": "YYYY-MM-DD jika terlihat, null jika tidak",
-  "reply": "Pesan konfirmasi natural untuk user"
+  "reply": "Pesan konfirmasi natural untuk user, sebutkan total yang dibayar"
 }}
 
 Pilih kategori dari daftar yang ada di context.
