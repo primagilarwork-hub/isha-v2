@@ -290,6 +290,11 @@ def handle_message(message: dict) -> str:
             return handle_check_budget({}, cycle)
         return "Aku tidak pakai command. Cukup chat natural aja ya 😊"
 
+    # Shortcut: sync sheets
+    if any(kw in text.lower() for kw in ["sync sheets", "sinkron sheets", "sync spreadsheet"]):
+        cycle = config.get_current_cycle()
+        return handle_sync_sheets(cycle)
+
     cycle = config.get_current_cycle()
     budget_status = db.get_budget_status(cycle["id"])
     recent = db.get_recent_expenses(5)
@@ -327,6 +332,19 @@ def handle_message(message: dict) -> str:
         reply += f"\n\n💡 {advice}"
 
     return reply
+
+
+def handle_sync_sheets(cycle: dict) -> str:
+    """Full sync Sheets dari Supabase."""
+    try:
+        expenses = db.get_expenses(cycle["id"])
+        budget_status = db.get_budget_status(cycle["id"])
+        sheets_sync.full_sync(cycle["id"], expenses)
+        sheets_sync.update_dashboard(budget_status)
+        return f"✅ Sync selesai! {len(expenses)} pengeluaran cycle ini sudah disinkronkan ke Sheets."
+    except Exception as e:
+        print(f"[sync_sheets error] {e}")
+        return "❌ Sync gagal. Coba lagi ya."
 
 
 def generate_reminder_message() -> str:

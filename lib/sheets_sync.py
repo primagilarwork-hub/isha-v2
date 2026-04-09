@@ -142,3 +142,36 @@ def update_dashboard(budget_status: dict) -> bool:
     except Exception as e:
         print(f"[sheets_sync] update_dashboard error: {e}")
         return False
+
+
+def full_sync(cycle_id: str, expenses: list) -> bool:
+    """Full sync: clear tab Pengeluaran dan tulis ulang dari Supabase."""
+    try:
+        ws = _get_sheet(TAB_EXPENSES)
+        cycle = get_current_cycle()
+
+        # Clear semua data (skip header row 1)
+        ws.batch_clear(["A2:I1000"])
+
+        if not expenses:
+            return True
+
+        rows = []
+        for e in expenses:
+            rows.append([
+                e.get("id", ""),
+                e.get("expense_date", ""),
+                e.get("category", ""),
+                e.get("budget_group", ""),
+                e.get("description", ""),
+                f"Rp {float(e.get('amount', 0)):,.0f}".replace(",", "."),
+                e.get("user_name", ""),
+                f"{cycle['start'].strftime('%d %b')} - {cycle['end'].strftime('%d %b %Y')}",
+                e.get("created_at", ""),
+            ])
+
+        ws.update(f"A2:I{1 + len(rows)}", rows)
+        return True
+    except Exception as e:
+        print(f"[sheets_sync] full_sync error: {e}")
+        return False
