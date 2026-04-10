@@ -322,6 +322,10 @@ def handle_message(message: dict) -> str:
         cycle = config.get_current_cycle()
         return generate_system_review(cycle["id"])
 
+    # Shortcut: apply budget dari review
+    if text.lower().startswith("apply"):
+        return handle_apply_budget(text, chat_id)
+
     # Cek pending action (konfirmasi hapus)
     chat_id = str(message.get("chat", {}).get("id", ""))
     if chat_id:
@@ -371,6 +375,48 @@ def handle_message(message: dict) -> str:
         reply += f"\n\n💡 {advice}"
 
     return reply
+
+
+def handle_apply_budget(text: str, chat_id: str) -> str:
+    """Apply saran budget dari System Review."""
+    # Ambil saran yang tersimpan
+    pending = db.get_pending_action("review_suggestions")
+    if not pending or pending["action_type"] != "budget_suggestions":
+        return "Tidak ada saran budget aktif. Ketik *review cycle* dulu ya."
+
+    suggestions = pending["action_data"]["suggestions"]
+    cycle_id = pending["action_data"]["cycle_id"]
+
+    # Parse nomor yang mau di-apply: "apply 1 2" atau "apply 1 dan 2" atau "apply semua"
+    text_lower = text.lower().replace("dan", " ").replace(",", " ")
+    if "semua" in text_lower or "all" in text_lower:
+        selected = [s["index"] for s in suggestions]
+    else:
+        import re
+        selected = [int(n) for n in re.findall(r'\d+', text_lower)]
+
+    if not selected:
+        return "Sebutkan nomor sarannya, contoh: _apply 1_ atau _apply 1 2_ atau _apply semua_"
+
+    applied = []
+    for s in suggestions:
+        if s["index"] in selected:
+            db.save_budget_override(
+                cycle_id=cycle_id,
+                budget_group=s["group"],
+                original=s["current"],
+                override=s["suggested"],
+                reason=s["reason"],
+            )
+            arrow = "⬆️" if s["suggested"] > s["current"] else "⬇️"
+            applied.append(f"{arrow} *{s['group']}*: Rp {s['current']:,.0f} → Rp {s['suggested']:,.0f}")
+
+    if not applied:
+        return "Nomor saran tidak ditemukan. Cek lagi nomor yang tersedia di System Review."
+
+    lines = ["✅ *Budget berhasil diupdate!*\n"] + applied
+    lines.append("\nBerlaku mulai cycle berikutnya 🚀")
+    return "\n".join(lines)
 
 
 def handle_sync_sheets(cycle: dict) -> str:
@@ -462,30 +508,46 @@ def generate_system_review(cycle_id: str) -> str:
     lines.append(f"Surplus: Rp {surplus:,.0f} | Saving rate: {saving_rate}%\n")
 
     lines.append("💰 *STATUS PER BUDGET*")
-    over_groups = []
-    under_groups = []
+    suggestions = []  # [(group_name, current, suggested, reason)]
+
     for g in groups:
         spent = summary["by_group"].get(g["name"], 0)
         pct = int(spent / g["amount"] * 100) if g["amount"] > 0 else 0
         remaining = g["amount"] - spent
         if pct >= 90:
             icon = "🔴"
-            over_groups.append(g["name"])
+            # Saran naik 10-20%
+            suggested = round(g["amount"] * 1.15 / 50000) * 50000
+            suggestions.append((g["name"], g["amount"], suggested, f"over {pct}% terpakai"))
+        elif pct < 50 and spent > 0:
+            icon = "✅"
+            # Saran turun
+            suggested = round(spent * 1.2 / 50000) * 50000
+            if suggested < g["amount"]:
+                suggestions.append((g["name"], g["amount"], suggested, f"selalu sisa Rp {remaining:,.0f}"))
         elif pct >= 70:
             icon = "⚠️"
         else:
             icon = "✅"
-            if pct < 50:
-                under_groups.append((g["name"], remaining))
         lines.append(f"{icon} {g['name']}: Rp {spent:,.0f} / {g['amount']:,.0f} ({pct}%)")
 
-    # Saran rebalancing
-    if over_groups or under_groups:
-        lines.append("\n🔄 *SARAN BUDGET*")
-        for og in over_groups:
-            lines.append(f"⬆️ *{og}* sering over — pertimbangkan naikkan budget")
-        for ug, sisa in under_groups:
-            lines.append(f"⬇️ *{ug}* selalu sisa Rp {sisa:,.0f} — bisa dialihkan ke yang kurang")
+    # Saran rebalancing dengan nomor
+    if suggestions:
+        lines.append("\n🔄 *SARAN BUDGET CYCLE BERIKUTNYA*")
+        for i, (name, current, suggested, reason) in enumerate(suggestions, 1):
+            arrow = "⬆️" if suggested > current else "⬇️"
+            lines.append(f"{i}. {arrow} *{name}*: Rp {current:,.0f} → Rp {suggested:,.0f} _{reason}_")
+
+        lines.append(f"\nKetik *apply [nomor]* untuk terapkan, contoh: _apply 1_ atau _apply 1 2_")
+
+        # Simpan saran ke pending action (pakai chat_id kosong = global)
+        db.save_pending_action("review_suggestions", "budget_suggestions", {
+            "suggestions": [
+                {"index": i, "group": s[0], "current": s[1], "suggested": s[2], "reason": s[3]}
+                for i, s in enumerate(suggestions, 1)
+            ],
+            "cycle_id": cycle["id"],
+        })
 
     if saving_rate > 0:
         lines.append(f"\n🎯 *PENCAPAIAN*")
