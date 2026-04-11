@@ -2,6 +2,7 @@ from http.server import BaseHTTPRequestHandler
 import json
 import os
 import sys
+from datetime import date
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
@@ -11,7 +12,6 @@ from lib.config import CRON_SECRET
 
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
-        # Verifikasi CRON_SECRET
         auth = self.headers.get("Authorization", "")
         if CRON_SECRET and auth != f"Bearer {CRON_SECRET}":
             self.send_response(401)
@@ -25,19 +25,26 @@ class handler(BaseHTTPRequestHandler):
 
         try:
             cycle = config.get_current_cycle()
+            today = date.today()
 
-            # Cek apakah hari ini hari terakhir cycle → kirim System Review
-            from datetime import date
-            if date.today() == cycle["end"]:
+            # Hari pertama cycle baru → kirim notifikasi awal cycle
+            if today == cycle["start"]:
+                msg = handlers.generate_new_cycle_message()
+                telegram.broadcast(msg)
+                self.wfile.write(json.dumps({"status": "ok", "event": "new_cycle"}).encode())
+                return
+
+            # Hari terakhir cycle → kirim System Review
+            if today == cycle["end"]:
                 review = handlers.generate_system_review(cycle["id"])
                 telegram.broadcast(review)
 
-            # Cek apakah hari Senin → kirim weekly summary
-            if date.today().weekday() == 0:  # 0 = Senin
+            # Hari Senin → kirim weekly summary
+            if today.weekday() == 0:
                 weekly = handlers.generate_weekly_summary()
                 telegram.broadcast(weekly)
 
-            # Kirim reminder harian
+            # Reminder harian
             reminder = handlers.generate_reminder_message()
             telegram.broadcast(reminder)
 

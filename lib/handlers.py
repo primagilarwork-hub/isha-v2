@@ -432,6 +432,61 @@ def handle_sync_sheets(cycle: dict) -> str:
         return "❌ Sync gagal. Coba lagi ya."
 
 
+def generate_new_cycle_message() -> str:
+    """Pesan sambutan cycle baru, dikirim di hari pertama cycle."""
+    cycle = config.get_current_cycle()
+    groups = config.get_budget_groups()
+
+    # Hitung cycle sebelumnya
+    from datetime import timedelta
+    prev_cycle_end = cycle["start"] - timedelta(days=1)
+    prev_cycle_start_day = config._CONFIG["cycle"]["start_day"]
+    if prev_cycle_end.day >= prev_cycle_start_day:
+        prev_cycle_start = prev_cycle_end.replace(day=prev_cycle_start_day)
+    else:
+        first = prev_cycle_end.replace(day=1)
+        prev_month = first - timedelta(days=1)
+        prev_cycle_start = prev_month.replace(day=prev_cycle_start_day)
+    prev_cycle_id = prev_cycle_start.strftime("%Y-%m-%d")
+
+    prev_summary = db.get_cycle_summary(prev_cycle_id)
+    total_budget = sum(g["amount"] for g in groups)
+
+    lines = [
+        f"🗓️ *Cycle baru dimulai!*",
+        f"_{cycle['start'].strftime('%d %b')} - {cycle['end'].strftime('%d %b %Y')}_\n",
+    ]
+
+    # Rekap cycle lalu kalau ada data
+    if prev_summary["total"] > 0:
+        prev_total = prev_summary["total"]
+        prev_surplus = total_budget - prev_total
+        prev_saving = int(prev_surplus / total_budget * 100) if total_budget > 0 else 0
+        lines.append(f"📊 *Rekap cycle lalu:*")
+        lines.append(f"Total pengeluaran: Rp {prev_total:,.0f} / {total_budget:,.0f}")
+        if prev_surplus > 0:
+            lines.append(f"Surplus: Rp {prev_surplus:,.0f} | Saving rate: {prev_saving}% 🎉")
+        else:
+            lines.append(f"Over budget: Rp {abs(prev_surplus):,.0f} 😅")
+        lines.append("")
+
+    # Budget cycle ini (cek override)
+    lines.append(f"💰 *Budget cycle ini:*")
+    has_override = False
+    for g in groups:
+        override = db.get_budget_override(cycle["id"], g["name"])
+        budgeted = override if override else g["amount"]
+        if override:
+            has_override = True
+            lines.append(f"• {g['name']}: Rp {budgeted:,.0f} _(diupdate)_")
+        else:
+            lines.append(f"• {g['name']}: Rp {budgeted:,.0f}")
+
+    lines.append(f"\nTotal budget: Rp {total_budget:,.0f}")
+    lines.append("\nSemangat! Catat pengeluaran pertama cycle ini ya 💪")
+    return "\n".join(lines)
+
+
 def generate_reminder_message() -> str:
     cycle = config.get_current_cycle()
     today = date.today().strftime("%Y-%m-%d")
