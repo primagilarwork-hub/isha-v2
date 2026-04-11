@@ -23,13 +23,12 @@ def _format_budget_reply(budget_status: dict, cycle: dict) -> str:
 
 
 def check_budget_alert(budget_group: str, cycle_id: str) -> str | None:
-    groups = config.get_budget_groups()
+    active = config.get_active_budgets(cycle_id)
     budget_status = db.get_budget_status(cycle_id)
-    for g in groups:
+    for g in active:
         if g["name"] == budget_group:
             spent = budget_status.get(budget_group, 0)
-            override = db.get_budget_override(cycle_id, budget_group)
-            budgeted = override if override else g["amount"]
+            budgeted = g["amount"]
             pct = int(spent / budgeted * 100) if budgeted > 0 else 0
             remaining = budgeted - spent
             if pct >= 90:
@@ -334,9 +333,51 @@ def handle_message(message: dict) -> str:
             if text.lower() in ["ya", "yes", "iya", "ok", "hapus"]:
                 if pending["action_type"] == "delete":
                     return confirm_delete(pending["action_data"]["expense_id"], chat_id)
+                elif pending["action_type"] == "remove_category":
+                    d = pending["action_data"]
+                    db.remove_category_override(d["cycle_id"], d["group"], d["category"])
+                    db.clear_pending_action(chat_id)
+                    return f"✅ Kategori *{d['category']}* dihapus dari *{d['group']}*."
+            elif text.lower() in ["ya hapus"]:
+                if pending["action_type"] == "remove_budget_group":
+                    d = pending["action_data"]
+                    if d.get("is_custom"):
+                        db.deactivate_custom_group(d["cycle_id"], d["group"])
+                    else:
+                        db.save_budget_override(d["cycle_id"], d["group"], 0, 0, "removed")
+                    db.clear_pending_action(chat_id)
+                    return f"✅ Budget *{d['group']}* dihapus."
+            elif text.lower() in ["ya reset"]:
+                if pending["action_type"] == "reset_all_budget":
+                    db.delete_budget_override(pending["action_data"]["cycle_id"])
+                    db.clear_pending_action(chat_id)
+                    return "✅ Semua budget dikembalikan ke nilai default YAML."
             elif text.lower() in ["batal", "cancel", "tidak", "nggak", "gak"]:
                 db.clear_pending_action(chat_id)
                 return "Oke, dibatalkan 👍"
+            # Handle pilihan unknown category (1/2/3)
+            elif pending["action_type"] == "unknown_category" and text.strip().isdigit():
+                d = pending["action_data"]
+                idx = int(text.strip()) - 1
+                suggestions = d.get("suggestions", [])
+                if 0 <= idx < len(suggestions):
+                    s = suggestions[idx]
+                    # Tambah kategori ke group
+                    db.add_category_override(d["cycle_id"], s["group"], s["category"])
+                    # Simpan mapping untuk next time
+                    db.save_category_mapping(d["description"].lower(), s["group"], s["category"])
+                    db.clear_pending_action(chat_id)
+                    # Catat expense
+                    cycle = config.get_current_cycle()
+                    items = [{"amount": d["amount"], "category": s["category"], "description": d["description"]}]
+                    saved = handle_expense(items, cycle, user_name)
+                    return f"✅ Kategori *{s['category']}* dibuat di *{s['group']}*.\n{saved}\n\n💡 Lain kali *{d['description']}* otomatis masuk ke {s['group']} > {s['category']}."
+                else:
+                    # Pilih Lain-lain
+                    db.clear_pending_action(chat_id)
+                    cycle = config.get_current_cycle()
+                    items = [{"amount": d["amount"], "category": "misc", "description": d["description"]}]
+                    return handle_expense(items, cycle, user_name)
 
     cycle = config.get_current_cycle()
     budget_status = db.get_budget_status(cycle["id"])
@@ -356,6 +397,12 @@ def handle_message(message: dict) -> str:
     try:
         if intent == "RECORD_EXPENSE":
             items = data.get("items", [])
+            # T-722: Cek unknown category
+            for item in items:
+                cat = item.get("category", "misc")
+                found = config.find_category_by_keyword(cat, cycle["id"])
+                if not found and cat not in config.get_all_categories():
+                    return handle_unknown_category(item.get("description", cat), item.get("amount", 0), cycle, chat_id)
             reply = handle_expense(items, cycle, user_name)
         elif intent == "CHECK_BUDGET":
             reply = handle_check_budget(data, cycle)
@@ -367,6 +414,22 @@ def handle_message(message: dict) -> str:
             reply = handle_edit(data, cycle)
         elif intent == "RECORD_INCOME":
             reply = handle_income(data, cycle)
+        elif intent == "VIEW_BUDGETS":
+            reply = handle_view_budgets(cycle)
+        elif intent == "EDIT_BUDGET":
+            reply = handle_edit_budget(data, cycle, chat_id)
+        elif intent == "ADD_CATEGORY":
+            reply = handle_add_category(data, cycle)
+        elif intent == "REMOVE_CATEGORY":
+            reply = handle_remove_category(data, cycle, chat_id)
+        elif intent == "CREATE_BUDGET_GROUP":
+            reply = handle_create_budget_group(data, cycle, chat_id)
+        elif intent == "REMOVE_BUDGET_GROUP":
+            reply = handle_remove_budget_group(data, cycle, chat_id)
+        elif intent == "RESET_BUDGET":
+            reply = handle_reset_budget(data, cycle, chat_id)
+        elif intent == "SETUP_BUDGET_HELP":
+            reply = handle_setup_budget_help(data, cycle, chat_id)
     except Exception as e:
         print(f"[handler error] intent={intent} error={e}")
         return "Maaf, ada error saat proses permintaanmu. Coba lagi ya 🙏"
@@ -611,4 +674,325 @@ def generate_system_review(cycle_id: str) -> str:
             lines.append("Luar biasa! Konsisten ya di cycle berikutnya 💪")
 
     lines.append("\nSemangat cycle baru! 🚀")
+    return "\n".join(lines)
+
+
+# ── Budget Management Handlers (T-713~725) ─────────────────
+
+def check_total_budget_vs_income(cycle_id: str, active_budgets: list = None) -> dict:
+    """T-723: Cek total budget vs income."""
+    if active_budgets is None:
+        active_budgets = config.get_active_budgets(cycle_id)
+    total_budget = sum(g["amount"] for g in active_budgets)
+    income = config._CONFIG.get("income", {}).get("monthly", 0)
+    over = total_budget - income
+    return {
+        "total_budget": total_budget,
+        "income": income,
+        "over_amount": over,
+        "is_over": over > 0,
+    }
+
+
+def suggest_budget_reallocation(cycle_id: str, need_amount: float) -> str:
+    """T-724: Saran realokasi budget berdasarkan pola pengeluaran."""
+    avg = db.get_average_spending_by_group(num_cycles=2)
+    active = config.get_active_budgets(cycle_id)
+    suggestions = []
+
+    for g in active:
+        avg_spent = avg.get(g["name"], g["amount"])
+        slack = g["amount"] - avg_spent
+        if slack > 50000:  # Ada sisa minimal 50rb
+            suggestions.append((g["name"], g["amount"], slack))
+
+    suggestions.sort(key=lambda x: x[2], reverse=True)
+
+    if not suggestions:
+        return "Tidak ada budget yang bisa dikurangi berdasarkan pola pengeluaran kamu."
+
+    lines = ["Saran berdasarkan pola pengeluaran kamu:"]
+    total_slack = 0
+    for name, current, slack in suggestions[:3]:
+        suggested = round((current - slack * 0.8) / 50000) * 50000
+        lines.append(f"• {name} ({current:,.0f}) → {suggested:,.0f} (hemat ~{slack*0.8:,.0f})")
+        total_slack += slack * 0.8
+
+    if total_slack >= need_amount:
+        lines.append(f"\nTotal bisa dihemat: Rp {total_slack:,.0f} ✅")
+    else:
+        lines.append(f"\nTotal bisa dihemat: Rp {total_slack:,.0f} (masih kurang Rp {need_amount-total_slack:,.0f})")
+
+    return "\n".join(lines)
+
+
+def handle_view_budgets(cycle: dict) -> str:
+    """T-713: Tampilkan semua budget aktif."""
+    active = config.get_active_budgets(cycle["id"])
+    income = config._CONFIG.get("income", {}).get("monthly", 0)
+    total = sum(g["amount"] for g in active)
+
+    lines = [f"💰 *Budget aktif cycle {cycle['start'].strftime('%d %b')} - {cycle['end'].strftime('%d %b')}:*\n"]
+    for g in active:
+        pct = int(g["amount"] / income * 100) if income > 0 else 0
+        tag = " _(custom)_" if g.get("is_custom") else ""
+        tag += " _(diubah)_" if g.get("is_overridden") else ""
+        cats = ", ".join(g["categories"][:4])
+        if len(g["categories"]) > 4:
+            cats += f" +{len(g['categories'])-4} lagi"
+        lines.append(f"• *{g['name']}*: Rp {g['amount']:,.0f} ({pct}%){tag}")
+        if g["categories"]:
+            lines.append(f"  └ {cats}")
+
+    status = "✅" if total <= income else "⚠️ over income"
+    lines.append(f"\nTotal: Rp {total:,.0f} / Rp {income:,.0f} {status}")
+    return "\n".join(lines)
+
+
+def handle_edit_budget(data: dict, cycle: dict, chat_id: str = "") -> str:
+    """T-714: Edit amount single budget."""
+    group_name = data.get("group", "")
+    new_amount = float(data.get("new_amount", 0))
+
+    if not group_name or new_amount <= 0:
+        return "Sebutkan nama budget dan jumlah barunya, contoh: _ubah budget makan jadi 3.5jt_"
+
+    # Cari group yang cocok (fuzzy)
+    active = config.get_active_budgets(cycle["id"])
+    matched = next((g for g in active if group_name.lower() in g["name"].lower()), None)
+    if not matched:
+        return f"Budget group '{group_name}' tidak ditemukan."
+
+    old_amount = matched["amount"]
+    db.save_budget_override(cycle["id"], matched["name"], old_amount, new_amount, "manual edit")
+
+    # Cek total vs income
+    check = check_total_budget_vs_income(cycle["id"])
+    new_total = check["total_budget"] - old_amount + new_amount
+    income = check["income"]
+
+    reply = f"✅ *{matched['name']}* diubah: Rp {old_amount:,.0f} → Rp {new_amount:,.0f}"
+    if new_total > income:
+        over = new_total - income
+        reply += f"\n\n⚠️ Total budget sekarang Rp {new_total:,.0f} — over Rp {over:,.0f} dari income.\nMau kurangi budget lain?"
+    return reply
+
+
+def handle_add_category(data: dict, cycle: dict) -> str:
+    """T-715: Tambah kategori ke group existing."""
+    group_name = data.get("group", "")
+    cat_name = data.get("category_name", "").lower().strip()
+
+    if not group_name or not cat_name:
+        return "Sebutkan nama group dan kategori, contoh: _tambah kategori langganan ke Tagihan_"
+
+    active = config.get_active_budgets(cycle["id"])
+    matched = next((g for g in active if group_name.lower() in g["name"].lower()), None)
+    if not matched:
+        return f"Budget group '{group_name}' tidak ditemukan."
+
+    if cat_name in [c.lower() for c in matched["categories"]]:
+        return f"Kategori '{cat_name}' sudah ada di {matched['name']}."
+
+    db.add_category_override(cycle["id"], matched["name"], cat_name)
+
+    updated_cats = matched["categories"] + [cat_name]
+    lines = [f"✅ Kategori *{cat_name}* ditambahkan ke *{matched['name']}*.\n"]
+    lines.append(f"Sekarang {matched['name']} punya {len(updated_cats)} kategori:")
+    for c in updated_cats:
+        marker = " (baru)" if c == cat_name else ""
+        lines.append(f"• {c}{marker}")
+    return "\n".join(lines)
+
+
+def handle_remove_category(data: dict, cycle: dict, chat_id: str = "") -> str:
+    """T-716: Hapus kategori dari group."""
+    cat_name = data.get("category_name", "").lower().strip()
+    group_name = data.get("group", "")
+
+    if not cat_name:
+        return "Sebutkan nama kategori yang mau dihapus."
+
+    active = config.get_active_budgets(cycle["id"])
+    matched_group = None
+    for g in active:
+        if cat_name in [c.lower() for c in g["categories"]]:
+            if not group_name or group_name.lower() in g["name"].lower():
+                matched_group = g
+                break
+
+    if not matched_group:
+        return f"Kategori '{cat_name}' tidak ditemukan."
+
+    # Cek expense history
+    count = db.count_expenses_by_category(cycle["id"], cat_name)
+    warning = f"⚠️ Kategori *{cat_name}* punya *{count} expense* di cycle ini." if count > 0 else ""
+
+    if chat_id:
+        db.save_pending_action(chat_id, "remove_category", {
+            "cycle_id": cycle["id"],
+            "group": matched_group["name"],
+            "category": cat_name,
+        })
+
+    lines = []
+    if warning:
+        lines.append(warning)
+        lines.append("Kalau dihapus, expense lama tetap ada di history.\n")
+    lines.append(f"Yakin hapus kategori *{cat_name}* dari *{matched_group['name']}*?")
+    lines.append("Balas *ya* untuk hapus, *batal* untuk cancel.")
+    return "\n".join(lines)
+
+
+def handle_create_budget_group(data: dict, cycle: dict, chat_id: str = "") -> str:
+    """T-717: Bikin budget group baru."""
+    name = data.get("name", "").strip()
+    amount = float(data.get("amount", 0))
+    categories = data.get("categories", [])
+
+    if not name or amount <= 0:
+        return "Sebutkan nama budget dan jumlahnya, contoh: _bikin budget Kebutuhan Anak 1.5jt_"
+
+    # Cek duplikat
+    active = config.get_active_budgets(cycle["id"])
+    if any(g["name"].lower() == name.lower() for g in active):
+        return f"Budget group '{name}' sudah ada."
+
+    db.create_custom_group(cycle["id"], name, amount, categories)
+
+    # Cek total vs income
+    total_new = sum(g["amount"] for g in active) + amount
+    income = config._CONFIG.get("income", {}).get("monthly", 0)
+
+    cats_str = f"\nKategori: {', '.join(categories)}" if categories else ""
+    reply = f"✅ Budget *{name}* dibuat dengan Rp {amount:,.0f}{cats_str}"
+
+    if total_new > income:
+        over = total_new - income
+        reply += f"\n\n⚠️ Total budget jadi Rp {total_new:,.0f} — over Rp {over:,.0f} dari income Rp {income:,.0f}."
+        reply += f"\n\n{suggest_budget_reallocation(cycle['id'], over)}"
+        reply += "\n\nMau aku bantu alokasi ulang? Atau tetap lanjut?"
+
+    return reply
+
+
+def handle_remove_budget_group(data: dict, cycle: dict, chat_id: str = "") -> str:
+    """T-718: Hapus budget group."""
+    group_name = data.get("group", "")
+    active = config.get_active_budgets(cycle["id"])
+    matched = next((g for g in active if group_name.lower() in g["name"].lower()), None)
+
+    if not matched:
+        return f"Budget group '{group_name}' tidak ditemukan."
+
+    spent = db.get_budget_status(cycle["id"]).get(matched["name"], 0)
+
+    if chat_id:
+        db.save_pending_action(chat_id, "remove_budget_group", {
+            "cycle_id": cycle["id"],
+            "group": matched["name"],
+            "is_custom": matched.get("is_custom", False),
+        })
+
+    lines = [f"⚠️ Budget *{matched['name']}* akan dihapus."]
+    if spent > 0:
+        lines.append(f"Ada Rp {spent:,.0f} terpakai di cycle ini.")
+    lines.append("Expense history tetap ada.\n")
+    lines.append("Ketik *ya hapus* untuk konfirmasi.")
+    return "\n".join(lines)
+
+
+def handle_reset_budget(data: dict, cycle: dict, chat_id: str = "") -> str:
+    """T-719: Reset budget ke YAML default."""
+    group = data.get("group", "")
+
+    if group == "all" or "semua" in group.lower():
+        overrides = db.get_budget_overrides(cycle["id"])
+        if not overrides:
+            return "Tidak ada override aktif. Budget sudah sesuai default."
+
+        if chat_id:
+            db.save_pending_action(chat_id, "reset_all_budget", {"cycle_id": cycle["id"]})
+
+        lines = ["⚠️ Ini akan kembalikan SEMUA budget ke nilai default YAML."]
+        lines.append("Perubahan yang akan di-revert:")
+        for o in overrides:
+            lines.append(f"• {o['budget_group']}: Rp {float(o['override_amount']):,.0f} → Rp {float(o['original_amount']):,.0f}")
+        lines.append("\nKetik *ya reset* untuk konfirmasi.")
+        return "\n".join(lines)
+
+    # Reset single group
+    active = config.get_active_budgets(cycle["id"])
+    matched = next((g for g in active if group.lower() in g["name"].lower()), None)
+    if not matched:
+        return f"Budget group '{group}' tidak ditemukan."
+
+    if not matched.get("is_overridden"):
+        return f"Budget *{matched['name']}* sudah di nilai default."
+
+    # Ambil original amount dari YAML
+    yaml_groups = config.get_budget_groups()
+    yaml_group = next((g for g in yaml_groups if g["name"] == matched["name"]), None)
+    original = yaml_group["amount"] if yaml_group else matched["amount"]
+
+    db.delete_budget_override(cycle["id"], matched["name"])
+    return f"✅ *{matched['name']}* dikembalikan ke default: Rp {original:,.0f}\n_(Dari override Rp {matched['amount']:,.0f})_"
+
+
+def handle_setup_budget_help(data: dict, cycle: dict, chat_id: str = "") -> str:
+    """T-720: Multi-step guided budget setup."""
+    step = data.get("step", "start")
+    income = data.get("income")
+
+    if step == "start" or not income:
+        if chat_id:
+            db.save_pending_action(chat_id, "setup_budget", {"step": "ask_income"})
+        return "Tentu! Berapa pemasukan bulanan kamu? (contoh: _10 juta_ atau _8500000_)"
+
+    return "Oke, aku bantu setup budget. Ketik *setup budget* untuk mulai dari awal."
+
+
+def handle_unknown_category(description: str, amount: float, cycle: dict, chat_id: str = "") -> str:
+    """T-721: Handle expense dengan kategori unknown."""
+    active = config.get_active_budgets(cycle["id"])
+
+    # Saran: masuk ke group mana
+    suggestions = []
+    # Cek keyword umum
+    kw_map = {
+        "netflix": ("Tagihan", "langganan"),
+        "spotify": ("Tagihan", "langganan"),
+        "youtube": ("Tagihan", "langganan"),
+        "grab": ("Transport", "ojol"),
+        "gojek": ("Transport", "ojol"),
+        "tokopedia": ("Lain-lain", "belanja-online"),
+        "shopee": ("Lain-lain", "belanja-online"),
+    }
+    desc_lower = description.lower()
+    for kw, (group, cat) in kw_map.items():
+        if kw in desc_lower:
+            suggestions.append((group, f"kategori baru '{cat}'", cat))
+            break
+
+    if not suggestions:
+        # Default suggestions
+        suggestions = [
+            ("Tagihan", "kategori baru 'langganan'", "langganan"),
+            ("Lain-lain", "kategori baru 'misc'", "misc"),
+        ]
+
+    if chat_id:
+        db.save_pending_action(chat_id, "unknown_category", {
+            "description": description,
+            "amount": amount,
+            "suggestions": [{"group": s[0], "label": s[1], "category": s[2]} for s in suggestions],
+            "cycle_id": cycle["id"],
+        })
+
+    lines = [f"🤔 *{description}* belum ada di kategori manapun.\n"]
+    lines.append("Saran aku, masukkan ke:")
+    for i, (group, label, cat) in enumerate(suggestions[:3], 1):
+        lines.append(f"{i}. {group} > {label}")
+    lines.append(f"{len(suggestions)+1}. Lain-lain (default)")
+    lines.append("\nBalas dengan nomor pilihanmu.")
     return "\n".join(lines)

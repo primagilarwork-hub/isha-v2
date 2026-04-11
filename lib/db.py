@@ -127,3 +127,145 @@ def get_pending_action(chat_id: str) -> dict | None:
 
 def clear_pending_action(chat_id: str) -> None:
     _client().table("pending_actions").delete().eq("chat_id", chat_id).execute()
+
+# ── Category overrides (T-704) ─────────────────────────────
+def add_category_override(cycle_id: str, budget_group: str, category_name: str) -> bool:
+    res = _client().table("category_overrides").insert({
+        "cycle_id": cycle_id,
+        "budget_group": budget_group,
+        "action": "add",
+        "category_name": category_name,
+    }).execute()
+    return bool(res.data)
+
+def remove_category_override(cycle_id: str, budget_group: str, category_name: str) -> bool:
+    res = _client().table("category_overrides").insert({
+        "cycle_id": cycle_id,
+        "budget_group": budget_group,
+        "action": "remove",
+        "category_name": category_name,
+    }).execute()
+    return bool(res.data)
+
+def get_category_overrides(cycle_id: str) -> list:
+    res = (
+        _client().table("category_overrides")
+        .select("*")
+        .eq("cycle_id", cycle_id)
+        .execute()
+    )
+    return res.data or []
+
+# ── Custom budget groups (T-705) ───────────────────────────
+def create_custom_group(cycle_id: str, name: str, amount: float, categories: list) -> bool:
+    res = _client().table("custom_budget_groups").insert({
+        "cycle_id": cycle_id,
+        "name": name,
+        "amount": amount,
+        "categories": categories,
+        "is_active": True,
+    }).execute()
+    return bool(res.data)
+
+def get_custom_groups(cycle_id: str) -> list:
+    res = (
+        _client().table("custom_budget_groups")
+        .select("*")
+        .eq("cycle_id", cycle_id)
+        .eq("is_active", True)
+        .execute()
+    )
+    return res.data or []
+
+def deactivate_custom_group(cycle_id: str, name: str) -> bool:
+    res = (
+        _client().table("custom_budget_groups")
+        .update({"is_active": False})
+        .eq("cycle_id", cycle_id)
+        .eq("name", name)
+        .execute()
+    )
+    return bool(res.data)
+
+# ── Category mappings (T-706) ──────────────────────────────
+def save_category_mapping(keyword: str, budget_group: str, category: str) -> bool:
+    # Upsert berdasarkan keyword
+    res = _client().table("category_mappings").upsert({
+        "keyword": keyword.lower(),
+        "budget_group": budget_group,
+        "category": category,
+    }, on_conflict="keyword").execute()
+    return bool(res.data)
+
+def get_category_mapping(keyword: str) -> dict | None:
+    res = (
+        _client().table("category_mappings")
+        .select("*")
+        .eq("keyword", keyword.lower())
+        .limit(1)
+        .execute()
+    )
+    return res.data[0] if res.data else None
+
+def get_all_mappings() -> list:
+    res = _client().table("category_mappings").select("*").execute()
+    return res.data or []
+
+# ── Analytics helpers (T-707) ──────────────────────────────
+def get_average_spending_by_group(num_cycles: int = 2) -> dict:
+    """Ambil rata-rata pengeluaran per group dari N cycle terakhir."""
+    from lib.config import get_current_cycle
+    from datetime import date, timedelta
+    cycle = get_current_cycle()
+
+    # Kumpulkan cycle IDs sebelumnya
+    cycle_ids = []
+    ref_date = cycle["start"] - timedelta(days=1)
+    for _ in range(num_cycles):
+        from lib.config import _CONFIG
+        start_day = _CONFIG["cycle"]["start_day"]
+        if ref_date.day >= start_day:
+            c_start = ref_date.replace(day=start_day)
+        else:
+            first = ref_date.replace(day=1)
+            prev = first - timedelta(days=1)
+            c_start = prev.replace(day=start_day)
+        cycle_ids.append(c_start.strftime("%Y-%m-%d"))
+        ref_date = c_start - timedelta(days=1)
+
+    if not cycle_ids:
+        return {}
+
+    all_totals = {}
+    for cid in cycle_ids:
+        summary = get_cycle_summary(cid)
+        for group, total in summary["by_group"].items():
+            all_totals.setdefault(group, []).append(total)
+
+    return {g: sum(v) / len(v) for g, v in all_totals.items()}
+
+def count_expenses_by_category(cycle_id: str, category: str) -> int:
+    res = (
+        _client().table("expenses")
+        .select("id", count="exact")
+        .eq("cycle_id", cycle_id)
+        .eq("category", category)
+        .execute()
+    )
+    return res.count or 0
+
+def delete_budget_override(cycle_id: str, budget_group: str | None = None) -> bool:
+    q = _client().table("budget_overrides").delete().eq("cycle_id", cycle_id)
+    if budget_group:
+        q = q.eq("budget_group", budget_group)
+    res = q.execute()
+    return True
+
+def get_budget_overrides(cycle_id: str) -> list:
+    res = (
+        _client().table("budget_overrides")
+        .select("*")
+        .eq("cycle_id", cycle_id)
+        .execute()
+    )
+    return res.data or []

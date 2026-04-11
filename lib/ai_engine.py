@@ -22,7 +22,7 @@ PERSONALITY:
 
 RESPONSE FORMAT (JSON ONLY, tidak ada teks lain di luar JSON):
 {
-  "intent": "RECORD_EXPENSE | CHECK_BUDGET | REPORT | DELETE_EXPENSE | EDIT_EXPENSE | RECORD_INCOME | ASK_ADVICE | GENERAL_CHAT",
+  "intent": "RECORD_EXPENSE | CHECK_BUDGET | REPORT | DELETE_EXPENSE | EDIT_EXPENSE | RECORD_INCOME | ASK_ADVICE | GENERAL_CHAT | VIEW_BUDGETS | EDIT_BUDGET | ADD_CATEGORY | REMOVE_CATEGORY | CREATE_BUDGET_GROUP | REMOVE_BUDGET_GROUP | RESET_BUDGET | SETUP_BUDGET_HELP",
   "data": {},
   "reply": "Pesan balasan natural untuk user",
   "advice": null
@@ -44,8 +44,35 @@ Untuk DELETE_EXPENSE:
 Untuk CHECK_BUDGET:
 {"budget_group": "nama group atau null untuk semua"}
 
+Untuk REPORT:
+{"period": "today | this_week | this_cycle"}
+
 Untuk RECORD_INCOME:
 {"amount": 10000000, "source": "gaji", "income_date": "YYYY-MM-DD"}
+
+Untuk VIEW_BUDGETS:
+{}
+
+Untuk EDIT_BUDGET:
+{"group": "Makan & Minum", "new_amount": 3500000}
+
+Untuk ADD_CATEGORY:
+{"group": "Tagihan", "category_name": "langganan"}
+
+Untuk REMOVE_CATEGORY:
+{"category_name": "jajan", "group": "Makan & Minum"}
+
+Untuk CREATE_BUDGET_GROUP:
+{"name": "Kebutuhan Anak", "amount": 1500000, "categories": ["popok", "susu"]}
+
+Untuk REMOVE_BUDGET_GROUP:
+{"group": "Tabungan & Investasi"}
+
+Untuk RESET_BUDGET:
+{"group": "Makan & Minum atau all untuk semua"}
+
+Untuk SETUP_BUDGET_HELP:
+{"step": "start", "income": null}
 
 ATURAN PARSING:
 - Currency default: IDR
