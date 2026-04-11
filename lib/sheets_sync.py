@@ -151,43 +151,42 @@ def update_dashboard(budget_status: dict, cycle_id: str = None) -> bool:
 
 
 def full_sync(cycle_id: str, expenses: list) -> bool:
-    """Full sync: hapus hanya baris cycle ini, tulis ulang dari Supabase."""
+    """Full sync: tulis ulang semua expense cycle ini ke Sheets."""
     try:
         ws = _get_sheet(TAB_EXPENSES)
         cycle = get_current_cycle()
+        cycle_label = f"{cycle['start'].strftime('%d %b')} - {cycle['end'].strftime('%d %b %Y')}"
 
-        # Cari dan hapus hanya baris yang cycle_id-nya cocok (kolom H = Cycle)
-        # Lebih aman: hapus berdasarkan ID yang ada di expenses list
+        # Ambil semua baris yang ada
+        all_values = ws.get_all_values()
+
+        # Cari baris yang cycle_id-nya cocok (kolom H = index 7)
+        rows_to_delete = []
+        for i, row in enumerate(all_values[1:], start=2):  # skip header row 1
+            if len(row) >= 8 and cycle_label in row[7]:
+                rows_to_delete.append(i)
+
+        # Hapus dari bawah ke atas supaya index tidak bergeser
+        for row_num in sorted(rows_to_delete, reverse=True):
+            ws.delete_rows(row_num)
+
+        # Append semua expense cycle ini
         if expenses:
-            expense_ids = {str(e.get("id", "")) for e in expenses if e.get("id")}
-            all_values = ws.get_all_values()
-            rows_to_delete = []
-            for i, row in enumerate(all_values[1:], start=2):  # skip header
-                row_id = str(row[0]) if row else ""
-                if row_id in expense_ids or (row_id == "" and len(row) > 7 and cycle["id"] in row[7]):
-                    rows_to_delete.append(i)
-
-            # Hapus dari bawah ke atas supaya index tidak bergeser
-            for row_num in sorted(rows_to_delete, reverse=True):
-                ws.delete_rows(row_num)
-
-        # Tulis ulang expenses cycle ini
-        rows = []
-        for e in expenses:
-            rows.append([
-                e.get("id", ""),
-                e.get("expense_date", ""),
-                e.get("category", ""),
-                e.get("budget_group", ""),
-                e.get("description", ""),
-                f"Rp {float(e.get('amount', 0)):,.0f}".replace(",", "."),
-                e.get("user_name", ""),
-                f"{cycle['start'].strftime('%d %b')} - {cycle['end'].strftime('%d %b %Y')}",
-                e.get("created_at", ""),
-            ])
-
-        if rows:
+            rows = []
+            for e in expenses:
+                rows.append([
+                    e.get("id", ""),
+                    e.get("expense_date", ""),
+                    e.get("category", ""),
+                    e.get("budget_group", ""),
+                    e.get("description", ""),
+                    f"Rp {float(e.get('amount', 0)):,.0f}".replace(",", "."),
+                    e.get("user_name", ""),
+                    cycle_label,
+                    e.get("created_at", ""),
+                ])
             ws.append_rows(rows)
+
         return True
     except Exception as e:
         print(f"[sheets_sync] full_sync error: {e}")
