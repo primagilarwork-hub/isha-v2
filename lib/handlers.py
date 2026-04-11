@@ -176,13 +176,19 @@ def handle_edit(data: dict, cycle: dict) -> str:
     # Sync ke Sheets — hapus baris lama, append yang baru
     try:
         updated = {**e, **updates}
-        # Pertahankan user_name dari record asli di Supabase
         if not updated.get("user_name"):
             updated["user_name"] = e.get("user_name", "")
+        # Coba sync_delete dengan ID sebagai string dan int
         sheets_sync.sync_delete(e["id"])
         sheets_sync.sync_expense(updated)
-    except Exception:
-        pass
+    except Exception as ex:
+        print(f"[handle_edit sheets sync error] {ex}")
+        # Fallback: full sync
+        try:
+            cycle_summary = db.get_expenses(cycle["id"])
+            sheets_sync.full_sync(cycle["id"], cycle_summary)
+        except Exception:
+            pass
 
     # Compose reply
     old_amount = float(e["amount"])
@@ -488,7 +494,7 @@ def handle_sync_sheets(cycle: dict) -> str:
         expenses = db.get_expenses(cycle["id"])
         budget_status = db.get_budget_status(cycle["id"])
         sheets_sync.full_sync(cycle["id"], expenses)
-        sheets_sync.update_dashboard(budget_status)
+        sheets_sync.update_dashboard(budget_status, cycle["id"])
         return f"✅ Sync selesai! {len(expenses)} pengeluaran cycle ini sudah disinkronkan ke Sheets."
     except Exception as e:
         print(f"[sync_sheets error] {e}")
@@ -765,6 +771,13 @@ def handle_edit_budget(data: dict, cycle: dict, chat_id: str = "") -> str:
 
     old_amount = matched["amount"]
     db.save_budget_override(cycle["id"], matched["name"], old_amount, new_amount, "manual edit")
+
+    # Update dashboard di Sheets
+    try:
+        budget_status = db.get_budget_status(cycle["id"])
+        sheets_sync.update_dashboard(budget_status, cycle["id"])
+    except Exception:
+        pass
 
     # Cek total vs income
     check = check_total_budget_vs_income(cycle["id"])

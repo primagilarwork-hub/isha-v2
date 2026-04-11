@@ -104,7 +104,10 @@ def sync_delete(expense_id: int) -> bool:
     """Hapus baris dengan ID tertentu dari tab Pengeluaran."""
     try:
         ws = _get_sheet(TAB_EXPENSES)
+        # Cari sebagai string dan int
         cell = ws.find(str(expense_id), in_column=1)
+        if not cell:
+            cell = ws.find(str(int(expense_id)), in_column=1)
         if cell:
             ws.delete_rows(cell.row)
         return True
@@ -113,12 +116,16 @@ def sync_delete(expense_id: int) -> bool:
         return False
 
 
-def update_dashboard(budget_status: dict) -> bool:
+def update_dashboard(budget_status: dict, cycle_id: str = None) -> bool:
     """Update tab Dashboard dengan status budget cycle aktif."""
     try:
         ws = _get_sheet(TAB_DASHBOARD)
         cycle = get_current_cycle()
-        groups = get_budget_groups()
+
+        # Pakai get_active_budgets supaya include overrides & custom groups
+        from lib.config import get_active_budgets
+        cid = cycle_id or cycle["id"]
+        groups = get_active_budgets(cid)
 
         rows = []
         for g in groups:
@@ -134,7 +141,6 @@ def update_dashboard(budget_status: dict) -> bool:
                 status = "✅"
             rows.append([g["name"], budgeted, spent, remaining, f"{pct}%", status])
 
-        # Clear dan tulis ulang (skip header row 1)
         ws.batch_clear(["A2:F50"])
         if rows:
             ws.update(f"A2:F{1+len(rows)}", rows)
