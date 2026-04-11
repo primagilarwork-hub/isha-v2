@@ -89,6 +89,8 @@ def get_budget_override(cycle_id: str, budget_group: str) -> float | None:
     return None
 
 def save_budget_override(cycle_id: str, budget_group: str, original: float, override: float, reason: str = "") -> bool:
+    # Hapus override lama untuk group ini dulu (upsert manual)
+    _client().table("budget_overrides").delete().eq("cycle_id", cycle_id).eq("budget_group", budget_group).execute()
     res = _client().table("budget_overrides").insert({
         "cycle_id": cycle_id,
         "budget_group": budget_group,

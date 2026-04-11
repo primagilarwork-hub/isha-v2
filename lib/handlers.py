@@ -305,6 +305,8 @@ def handle_income(data: dict, cycle: dict) -> str:
 def handle_message(message: dict) -> str:
     text = message.get("text", "")
     user_name = message.get("from", {}).get("first_name", "")
+    chat_id = str(message.get("chat", {}).get("id", ""))
+
     if not text:
         return "Maaf, aku belum bisa proses pesan ini. Coba kirim teks ya."
 
@@ -331,8 +333,7 @@ def handle_message(message: dict) -> str:
     if text.lower().startswith("apply"):
         return handle_apply_budget(text, chat_id)
 
-    # Cek pending action (konfirmasi hapus)
-    chat_id = str(message.get("chat", {}).get("id", ""))
+    # Cek pending action
     if chat_id:
         pending = db.get_pending_action(chat_id)
         if pending:
