@@ -151,7 +151,7 @@ def update_dashboard(budget_status: dict, cycle_id: str = None) -> bool:
 
 
 def full_sync(cycle_id: str, expenses: list) -> bool:
-    """Full sync: tulis ulang semua expense cycle ini ke Sheets."""
+    """Full sync: tulis ulang semua expense cycle ini ke Sheets, sorted by date."""
     try:
         ws = _get_sheet(TAB_EXPENSES)
         cycle = get_current_cycle()
@@ -160,32 +160,35 @@ def full_sync(cycle_id: str, expenses: list) -> bool:
         # Ambil semua baris yang ada
         all_values = ws.get_all_values()
 
-        # Cari baris yang cycle_id-nya cocok (kolom H = index 7)
-        rows_to_delete = []
-        for i, row in enumerate(all_values[1:], start=2):  # skip header row 1
-            if len(row) >= 8 and cycle_label in row[7]:
-                rows_to_delete.append(i)
+        # Pisahkan: header, baris cycle lain, baris cycle ini (akan dihapus)
+        header = all_values[0] if all_values else []
+        other_rows = []
+        for row in all_values[1:]:
+            # Pertahankan baris yang bukan cycle ini
+            if len(row) >= 8 and cycle_label not in row[7]:
+                other_rows.append(row)
 
-        # Hapus dari bawah ke atas supaya index tidak bergeser
-        for row_num in sorted(rows_to_delete, reverse=True):
-            ws.delete_rows(row_num)
+        # Build baris baru dari Supabase, sort by expense_date desc
+        new_rows = []
+        sorted_expenses = sorted(expenses, key=lambda e: e.get("expense_date", ""), reverse=True)
+        for e in sorted_expenses:
+            new_rows.append([
+                e.get("id", ""),
+                e.get("expense_date", ""),
+                e.get("category", ""),
+                e.get("budget_group", ""),
+                e.get("description", ""),
+                f"Rp {float(e.get('amount', 0)):,.0f}".replace(",", "."),
+                e.get("user_name", ""),
+                cycle_label,
+                e.get("created_at", ""),
+            ])
 
-        # Append semua expense cycle ini
-        if expenses:
-            rows = []
-            for e in expenses:
-                rows.append([
-                    e.get("id", ""),
-                    e.get("expense_date", ""),
-                    e.get("category", ""),
-                    e.get("budget_group", ""),
-                    e.get("description", ""),
-                    f"Rp {float(e.get('amount', 0)):,.0f}".replace(",", "."),
-                    e.get("user_name", ""),
-                    cycle_label,
-                    e.get("created_at", ""),
-                ])
-            ws.append_rows(rows)
+        # Tulis ulang semua: header + cycle baru + cycle lain
+        all_new = [header] + new_rows + other_rows
+        ws.clear()
+        if all_new:
+            ws.update(f"A1:I{len(all_new)}", all_new)
 
         return True
     except Exception as e:
