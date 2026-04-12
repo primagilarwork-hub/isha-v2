@@ -51,13 +51,18 @@ def authenticate(request_headers: dict) -> tuple[dict | None, int]:
     """
     Authenticate request dari Mini App.
     Returns (user_dict, status_code).
-    200 = OK, 401 = Unauthorized, 403 = Forbidden.
     """
-    init_data = request_headers.get("X-Telegram-Init-Data", "")
-
-    # Dev mode: skip auth kalau tidak ada init data dan ada DEV_MODE env
-    if not init_data and os.environ.get("MINIAPP_DEV_MODE") == "true":
+    # Dev mode: skip auth kalau MINIAPP_DEV_MODE=true
+    if os.environ.get("MINIAPP_DEV_MODE") == "true":
         return {"id": 0, "first_name": "Dev"}, 200
+
+    # Coba berbagai format header key (case-insensitive)
+    init_data = (
+        request_headers.get("X-Telegram-Init-Data")
+        or request_headers.get("x-telegram-init-data")
+        or request_headers.get("HTTP_X_TELEGRAM_INIT_DATA")
+        or ""
+    )
 
     user = validate_telegram_init_data(init_data)
     if not user:
