@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+  <title>Isha — Keuangan Keluarga</title>
+
+  <!-- Telegram WebApp SDK -->
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+
+  <!-- Design tokens & base styles -->
+  <link rel="stylesheet" href="/webapp/assets/theme.css" />
+  <link rel="stylesheet" href="/webapp/assets/base.css" />
+
+  <!-- Components CSS -->
+  <link rel="stylesheet" href="/webapp/assets/components/button.css" />
+  <link rel="stylesheet" href="/webapp/assets/components/card.css" />
+  <link rel="stylesheet" href="/webapp/assets/components/progress-bar.css" />
+  <link rel="stylesheet" href="/webapp/assets/components/budget-card.css" />
+  <link rel="stylesheet" href="/webapp/assets/components/expense-item.css" />
+  <link rel="stylesheet" href="/webapp/assets/components/modal.css" />
+  <link rel="stylesheet" href="/webapp/assets/components/form-field.css" />
+  <link rel="stylesheet" href="/webapp/assets/components/tab-bar.css" />
+
+  <style>
+    /* Page-specific styles */
+    .dashboard-cycle-info {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: var(--space-4);
+    }
+    .cycle-label { font-size: var(--text-sm); font-weight: var(--font-weight-medium); color: var(--color-text); }
+    .cycle-days { font-size: var(--text-xs); color: var(--color-text-secondary); }
+    .summary-pct { font-size: var(--text-xs); color: var(--color-text-secondary); margin-top: var(--space-2); }
+    .today-total { font-size: var(--text-xl); font-weight: var(--font-weight-semibold); }
+    .history-date-header {
+      display: flex;
+      justify-content: space-between;
+      padding: var(--space-2) var(--space-4);
+      font-size: var(--text-xs);
+      font-weight: var(--font-weight-semibold);
+      color: var(--color-text-secondary);
+      background: var(--color-bg-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .history-items { border: 1px solid var(--color-border); border-radius: var(--radius-lg); overflow: hidden; margin-bottom: var(--space-3); }
+    .budgets-summary { display: flex; justify-content: space-between; margin-bottom: var(--space-4); font-size: var(--text-sm); }
+    .budget-card-actions { display: flex; gap: var(--space-2); margin-top: calc(-1 * var(--space-2)); margin-bottom: var(--space-2); }
+    .top-cat-item { display: flex; justify-content: space-between; padding: var(--space-2) 0; border-bottom: 1px solid var(--color-border); font-size: var(--text-sm); }
+    .top-cat-item:last-child { border-bottom: none; }
+    .page-title { font-size: var(--text-xl); font-weight: var(--font-weight-semibold); margin-bottom: var(--space-5); }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div id="content">
+      <div class="loading">Memuat Isha...</div>
+    </div>
+    <nav class="tab-bar" id="tab-bar"></nav>
+  </div>
+
+  <script type="module">
+    import { tg } from '/webapp/assets/core/telegram.js';
+    import { navigate } from '/webapp/assets/core/router.js';
+
+    // Init Telegram WebApp
+    tg.init();
+
+    // Initial route
+    navigate('/');
+  </script>
+</body>
+</html>

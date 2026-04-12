@@ -5,7 +5,8 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from lib import handlers, telegram, config as app_config
+from lib import handlers, telegram
+from lib import config as app_config
 
 
 class handler(BaseHTTPRequestHandler):
@@ -24,7 +25,6 @@ class handler(BaseHTTPRequestHandler):
             if not message:
                 return
 
-            # Handle foto (receipt scanning)
             if message.get("photo"):
                 cycle = app_config.get_current_cycle()
                 user_name = message.get("from", {}).get("first_name", "")
