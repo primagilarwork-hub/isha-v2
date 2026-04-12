@@ -1,8 +1,13 @@
-from supabase import create_client
+from supabase import create_client, Client
 from lib.config import SUPABASE_URL, SUPABASE_KEY
 
-def _client():
-    return create_client(SUPABASE_URL, SUPABASE_KEY)
+_supabase_client: Client | None = None
+
+def _client() -> Client:
+    global _supabase_client
+    if _supabase_client is None:
+        _supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
+    return _supabase_client
 
 # ── Expenses ───────────────────────────────────────────────
 def add_expense(data: dict) -> dict:
@@ -36,6 +41,7 @@ def get_expenses(cycle_id: str, filters: dict = None) -> list:
     return res.data or []
 
 def get_budget_status(cycle_id: str) -> dict:
+    """Return total spent per budget_group untuk cycle ini."""
     res = (
         _client().table("expenses")
         .select("budget_group, amount")
@@ -43,10 +49,10 @@ def get_budget_status(cycle_id: str) -> dict:
         .execute()
     )
     rows = res.data or []
-    totals = {}
+    totals: dict[str, float] = {}
     for row in rows:
         g = row["budget_group"]
-        totals[g] = totals.get(g, 0) + float(row["amount"])
+        totals[g] = totals.get(g, 0.0) + float(row["amount"])
     return totals
 
 def get_daily_summary(expense_date: str) -> dict:
@@ -103,14 +109,18 @@ def save_budget_override(cycle_id: str, budget_group: str, original: float, over
 
 # ── Pending actions (untuk konfirmasi hapus/edit) ──────────
 def save_pending_action(chat_id: str, action_type: str, action_data: dict) -> bool:
-    # Hapus pending lama untuk chat ini dulu
-    _client().table("pending_actions").delete().eq("chat_id", chat_id).execute()
-    res = _client().table("pending_actions").insert({
-        "chat_id": chat_id,
-        "action_type": action_type,
-        "action_data": action_data,
-    }).execute()
-    return bool(res.data)
+    # Upsert: hapus lama + insert baru dalam satu operasi logis
+    try:
+        _client().table("pending_actions").delete().eq("chat_id", chat_id).execute()
+        res = _client().table("pending_actions").insert({
+            "chat_id": chat_id,
+            "action_type": action_type,
+            "action_data": action_data,
+        }).execute()
+        return bool(res.data)
+    except Exception as e:
+        print(f"[db] save_pending_action error: {e}")
+        return False
 
 def get_pending_action(chat_id: str) -> dict | None:
     # Hapus yang sudah lebih dari 5 menit

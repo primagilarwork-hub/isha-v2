@@ -1,14 +1,21 @@
 from datetime import date, timedelta
 from lib import config, db, ai_engine, telegram, sheets_sync
 
+# ── Constants ──────────────────────────────────────────────
+BUDGET_ALERT_CRITICAL = 90   # % → 🔴
+BUDGET_ALERT_WARNING = 70    # % → ⚠️
+BUDGET_ALERT_REMINDER = 80   # % → reminder malam
+MAX_EXPENSE_AMOUNT = 100_000_000  # 100jt
+RECENT_EXPENSES_LIMIT = 10
+SEARCH_EXPENSES_LIMIT = 10
+
 
 def _format_budget_reply(budget_status: dict, cycle: dict) -> str:
-    groups = config.get_budget_groups()
+    active = config.get_active_budgets(cycle["id"])
     lines = [f"📊 *Budget Cycle {cycle['start'].strftime('%d %b')} - {cycle['end'].strftime('%d %b')}*\n"]
-    for g in groups:
+    for g in active:
         spent = budget_status.get(g["name"], 0)
-        override = db.get_budget_override(cycle["id"], g["name"])
-        budgeted = override if override else g["amount"]
+        budgeted = g["amount"]
         remaining = budgeted - spent
         pct = int(spent / budgeted * 100) if budgeted > 0 else 0
         if pct >= 90:
@@ -17,19 +24,25 @@ def _format_budget_reply(budget_status: dict, cycle: dict) -> str:
             icon = "⚠️"
         else:
             icon = "✅"
-        lines.append(f"{icon} *{g['name']}*: Rp {spent:,.0f} / {budgeted:,.0f} ({pct}%)")
+        tag = " _(diubah)_" if g.get("is_overridden") else ""
+        lines.append(f"{icon} *{g['name']}*: Rp {spent:,.0f} / {budgeted:,.0f} ({pct}%){tag}")
     lines.append(f"\n_{cycle['days_remaining']} hari tersisa di cycle ini_")
     return "\n".join(lines)
 
 
-def check_budget_alert(budget_group: str, cycle_id: str) -> str | None:
-    active = config.get_active_budgets(cycle_id)
-    budget_status = db.get_budget_status(cycle_id)
-    for g in active:
+def check_budget_alert(budget_group: str, cycle_id: str, budget_status: dict = None, active_budgets: list = None) -> str | None:
+    """Cek alert budget. Pass budget_status dan active_budgets untuk hindari N+1 query."""
+    if active_budgets is None:
+        active_budgets = config.get_active_budgets(cycle_id)
+    if budget_status is None:
+        budget_status = db.get_budget_status(cycle_id)
+    for g in active_budgets:
         if g["name"] == budget_group:
             spent = budget_status.get(budget_group, 0)
             budgeted = g["amount"]
-            pct = int(spent / budgeted * 100) if budgeted > 0 else 0
+            if budgeted <= 0:
+                return None
+            pct = int(spent / budgeted * 100)
             remaining = budgeted - spent
             if pct >= 90:
                 return f"🔴 *Budget {budget_group} hampir habis!* ({pct}% terpakai, sisa Rp {remaining:,.0f})"
@@ -45,10 +58,15 @@ def handle_expense(items: list, cycle: dict, user_name: str = "") -> str:
     saved = []
     alerts = []
 
+    # Ambil sekali, pakai untuk semua items (hindari N+1)
+    active_budgets = config.get_active_budgets(cycle["id"])
+
     for item in items:
         amount = float(item.get("amount", 0))
         if amount <= 0:
             continue
+        if amount > 100_000_000:  # Validasi: max 100jt per transaksi
+            return f"Jumlah Rp {amount:,.0f} terlalu besar. Cek lagi ya."
 
         category = item.get("category", "misc")
         budget_info = config.get_budget_for_category(category)
@@ -65,22 +83,27 @@ def handle_expense(items: list, cycle: dict, user_name: str = "") -> str:
         }
         saved_record = db.add_expense(record)
         record["id"] = saved_record.get("id", "")
-        record["user_name"] = user_name
         record["created_at"] = saved_record.get("created_at", "")
         saved.append(record)
 
-        # Sync ke Sheets (best effort)
         try:
             sheets_sync.sync_expense(record)
         except Exception:
             pass
 
-        alert = check_budget_alert(budget_info["group_name"], cycle["id"])
-        if alert and alert not in alerts:
-            alerts.append(alert)
-
     if not saved:
         return "Tidak ada pengeluaran yang berhasil dicatat."
+
+    # Cek alert sekali setelah semua tersimpan (hindari N+1)
+    budget_status = db.get_budget_status(cycle["id"])
+    seen_groups = set()
+    for r in saved:
+        g = r["budget_group"]
+        if g not in seen_groups:
+            seen_groups.add(g)
+            alert = check_budget_alert(g, cycle["id"], budget_status, active_budgets)
+            if alert:
+                alerts.append(alert)
 
     if len(saved) == 1:
         r = saved[0]
@@ -577,7 +600,7 @@ def generate_reminder_message() -> str:
     for g in groups:
         spent = budget_status.get(g["name"], 0)
         pct = int(spent / g["amount"] * 100) if g["amount"] > 0 else 0
-        if pct >= 80:
+        if pct >= BUDGET_ALERT_REMINDER:
             lines.append(f"⚠️ Budget *{g['name']}* sudah {pct}% terpakai")
 
     if cycle["days_remaining"] <= 3:

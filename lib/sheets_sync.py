@@ -18,12 +18,17 @@ TAB_REKAP = "Rekap Bulanan"
 TAB_CONFIG = "Config"
 
 
+_gc_client = None
+
 def _client():
+    global _gc_client
     if not _CREDS_JSON:
         raise ValueError("GOOGLE_SHEETS_CREDS not set")
-    creds_dict = json.loads(_CREDS_JSON)
-    creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
-    return gspread.authorize(creds)
+    if _gc_client is None:
+        creds_dict = json.loads(_CREDS_JSON)
+        creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
+        _gc_client = gspread.authorize(creds)
+    return _gc_client
 
 
 def _get_sheet(tab_name: str):
