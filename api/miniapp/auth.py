@@ -53,9 +53,6 @@ def authenticate(request_headers: dict) -> tuple[dict | None, int]:
     Returns (user_dict, status_code).
     """
     # Dev mode — aktifkan dengan set MINIAPP_DEV_MODE=true di env
-    # atau uncomment baris di bawah untuk testing lokal:
-    return {"id": 0, "first_name": "Dev"}, 200
-
     if os.environ.get("MINIAPP_DEV_MODE", "").lower() == "true":
         return {"id": 0, "first_name": "Dev"}, 200
 
