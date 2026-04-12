@@ -52,8 +52,11 @@ def authenticate(request_headers: dict) -> tuple[dict | None, int]:
     Authenticate request dari Mini App.
     Returns (user_dict, status_code).
     """
-    # Dev mode: skip auth kalau MINIAPP_DEV_MODE=true
-    if os.environ.get("MINIAPP_DEV_MODE") == "true":
+    # Dev mode — aktifkan dengan set MINIAPP_DEV_MODE=true di env
+    # atau uncomment baris di bawah untuk testing lokal:
+    # return {"id": 0, "first_name": "Dev"}, 200
+
+    if os.environ.get("MINIAPP_DEV_MODE", "").lower() == "true":
         return {"id": 0, "first_name": "Dev"}, 200
 
     # Coba berbagai format header key (case-insensitive)
