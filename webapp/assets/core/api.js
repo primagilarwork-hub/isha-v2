@@ -24,11 +24,12 @@ class IshaAPI {
         ...(options.headers || {}),
       },
     });
-    const data = await res.json();
-    if (!res.ok) {
-      throw new Error(data.error?.message || `API error ${res.status}`);
+    const json = await res.json();
+    if (!res.ok || json.success === false) {
+      throw new Error(json.error?.message || json.error || `API error ${res.status}`);
     }
-    return data.data ?? data;
+    // Support both { data: {...} } and flat response
+    return json.data !== undefined ? json.data : json;
   }
 
   // Dashboard
