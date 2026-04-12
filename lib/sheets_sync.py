@@ -168,9 +168,9 @@ def full_sync(cycle_id: str, expenses: list) -> bool:
             if len(row) >= 8 and cycle_label not in row[7]:
                 other_rows.append(row)
 
-        # Build baris baru dari Supabase, sort by expense_date desc
+        # Build baris baru dari Supabase, sort by expense_date desc, id desc
         new_rows = []
-        sorted_expenses = sorted(expenses, key=lambda e: e.get("expense_date", ""), reverse=True)
+        sorted_expenses = sorted(expenses, key=lambda e: (e.get("expense_date", ""), e.get("id", 0)), reverse=True)
         for e in sorted_expenses:
             new_rows.append([
                 e.get("id", ""),
