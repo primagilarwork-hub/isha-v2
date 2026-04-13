@@ -1,4 +1,4 @@
-const TABS = [
+export const TABS = [
   { path: '/', icon: '🏠', label: 'Home' },
   { path: '/add', icon: '➕', label: 'Tambah' },
   { path: '/history', icon: '📋', label: 'Riwayat' },

@@ -1,4 +1,4 @@
-import { TabBar } from '../components/tab-bar.js';
+import { TabBar, TABS } from '../components/tab-bar.js';
 
 const ROUTES = {
   '/': () => import('../pages/dashboard.js').then(m => m.initDashboard()),
@@ -13,10 +13,17 @@ let currentPath = '/';
 export async function navigate(path) {
   currentPath = path;
 
-  // Update tab bar
+  // Update tab bar active state
   const tabBar = document.getElementById('tab-bar');
-  if (tabBar) tabBar.outerHTML = TabBar(path);
-  else document.getElementById('app').insertAdjacentHTML('beforeend', TabBar(path));
+  if (tabBar) {
+    tabBar.innerHTML = TABS.map(tab => `
+      <button class="tab-item ${tab.path === path ? 'active' : ''}"
+              onclick="navigate('${tab.path}')">
+        <span class="tab-icon">${tab.icon}</span>
+        <span>${tab.label}</span>
+      </button>
+    `).join('');
+  }
 
   // Clear content
   const content = document.getElementById('content');

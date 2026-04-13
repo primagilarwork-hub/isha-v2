@@ -21,8 +21,16 @@ def validate_telegram_init_data(init_data: str) -> dict | None:
 
         data_check = "\n".join(f"{k}={v}" for k, v in sorted(parsed.items()))
         bot_token = os.environ.get("TELEGRAM_TOKEN", "")
-        secret_key = hmac.new(b"WebAppData", bot_token.encode(), hashlib.sha256).digest()
-        expected_hash = hmac.new(secret_key, data_check.encode(), hashlib.sha256).hexdigest()
+        secret_key = hmac.new(
+            b"WebAppData",
+            bot_token.encode(),
+            hashlib.sha256
+        ).digest()
+        expected_hash = hmac.new(
+            secret_key,
+            data_check.encode(),
+            hashlib.sha256
+        ).hexdigest()
 
         if not hmac.compare_digest(expected_hash, received_hash):
             return None
